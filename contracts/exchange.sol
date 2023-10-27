@@ -275,7 +275,7 @@ contract Exchange {
                 closeSellRequest(sellRequest, i);
 
                 // transfer to buyer now (without lock)
-                token.transferFrom(sellRequest.user, buyRequest.user, sellRequest.tokenAmount);
+                token.transfer(buyRequest.user, sellRequest.tokenAmount);
                 buyRequest = shrinkBuyRequest(
                     buyRequest, sellRequest.weiAmount, sellRequest.tokenAmount, buyRI);
 
@@ -294,7 +294,7 @@ contract Exchange {
                     closeSellRequest(sellRequest, i);
                 
                 // transfer to buyer now (without lock)
-                token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
+                token.transfer(buyRequest.user, buyRequest.tokenAmount);
                 closeBuyRequest(buyRequest, buyRI);
 
                 return ;
