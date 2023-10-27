@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 interface ParsaTokenInterface{
-    // Parsa use The ERC-20 token as parent of its token
+    // Parsa uses The ERC-20 token as parent of its token
     function mint(address account, uint256 value) external ;
     function balanceOf(address account) external view returns (uint256);
     function transfer(address to, uint256 value) external returns (bool);
@@ -18,7 +18,7 @@ contract Exchange {
         address user;
         uint256 tokenAmount;
         uint256 weiAmount;
-        uint256 rate;
+        uint256 rate; // wei per token
         bool allAtOnce;
     }
 
@@ -64,6 +64,7 @@ contract Exchange {
     // 
 
     function airDrop(address user, uint256 amount) external onlyOwner {
+        // later we can create a lottery
         token.mint(user, amount);
     }
 
@@ -171,7 +172,7 @@ contract Exchange {
     function shrinkSellRequest(
         ExchangeRequest memory sellRequest,
         ExchangeRequest memory shrink,
-        uint256 index) internal{
+        uint256 index) internal returns (ExchangeRequest memory) {
 
         sellRequest.weiAmount -= shrink.weiAmount;
         sellRequest.tokenAmount -= shrink.tokenAmount;
@@ -182,6 +183,8 @@ contract Exchange {
             sellRequest.user, 
             sellRequest.weiAmount, 
             sellRequest.tokenAmount);
+
+        return  sellRequest;
     }
 
     function closeSellRequest(
@@ -206,16 +209,16 @@ contract Exchange {
     // 
     // 
 
-    function submitBuyRequest(uint256 _tokenAmount, uint256 _weiAmount, bool allAtOnce) payable external {
-        require(_tokenAmount > 0, "Invalid token amount");
-        require(_weiAmount > 0, "Invalid Wei amount");
+    function submitBuyRequest(uint256 tokenAmount, uint256 weiAmount, bool allAtOnce) payable external {
+        require(tokenAmount > 0, "Invalid token amount");
+        require(weiAmount > 0, "Invalid Wei amount");
         require(msg.value > 0, "Insufficiant Wei amount");
 
         ExchangeRequest memory buyRequest = ExchangeRequest(
             msg.sender, 
-            _tokenAmount, 
-            _weiAmount, 
-            _weiAmount / _tokenAmount, 
+            tokenAmount, 
+            weiAmount, 
+            weiAmount / tokenAmount, 
             allAtOnce
             );
 
@@ -234,8 +237,8 @@ contract Exchange {
 
             if(buyRequest.rate < sellRequest.rate)
                 break ;
-            if(sellRequest.allAtOnce && buyRequest.weiAmount < sellRequest.weiAmount)
-                continue;
+            if(sellRequest.allAtOnce && sellRequest.weiAmount > buyRequest.weiAmount)
+                continue ;
             if(buyRequest.tokenAmount > sellRequest.tokenAmount) // buyer all at once
                 continue ;
 
@@ -257,9 +260,8 @@ contract Exchange {
             // transfer to buyer now (without lock)
             token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
             closeBuyRequest(buyRequest, buyRI);
-            buyRequest.tokenAmount = 0;
 
-            break ;
+            return  ;
         }
 
         // lock weis to match later
@@ -275,8 +277,8 @@ contract Exchange {
 
             if(buyRequest.rate < sellRequest.rate)
                 break ;
-            if(sellRequest.allAtOnce && buyRequest.weiAmount < sellRequest.weiAmount)
-                continue;  
+            if(sellRequest.allAtOnce && sellRequest.weiAmount > buyRequest.weiAmount)
+                continue ;
 
             if(buyRequest.tokenAmount > sellRequest.tokenAmount){
                 payable(sellRequest.user).transfer(sellRequest.weiAmount);
@@ -286,9 +288,11 @@ contract Exchange {
                 token.transferFrom(sellRequest.user, buyRequest.user, sellRequest.tokenAmount);
                 buyRequest = shrinkBuyRequest(buyRequest, sellRequest, buyRI);
 
-                // check for owner profit
-                if(buyRequest.tokenAmount == 0 && buyRequest.weiAmount > 0){
-                    payable(owner).transfer(buyRequest.weiAmount);
+                if(buyRequest.tokenAmount == 0){
+                    // check for owner profit
+                    if(buyRequest.weiAmount > 0){
+                        payable(owner).transfer(buyRequest.weiAmount);
+                    }
                     closeBuyRequest(buyRequest, buyRI);
                     return ;
                 }
@@ -312,9 +316,8 @@ contract Exchange {
                 // transfer to buyer now (without lock)
                 token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
                 closeBuyRequest(buyRequest, buyRI);
-                buyRequest.tokenAmount = 0;
 
-                break  ;
+                return   ;
             }            
         }
 
@@ -332,16 +335,16 @@ contract Exchange {
     // 
     // 
 
-    function submitSellRequest(uint256 _tokenAmount, uint256 _weiAmount, bool allAtOnce) external {
-        require(_tokenAmount > 0, "Invalid token amount");
-        require(_weiAmount > 0, "Invalid ETH amount");
+    function submitSellRequest(uint256 tokenAmount, uint256 weiAmount, bool allAtOnce) external {
+        require(tokenAmount > 0, "Invalid token amount");
+        require(weiAmount > 0, "Invalid ETH amount");
         require(token.balanceOf(msg.sender) > 0, "Insufficiant token amount");
 
         ExchangeRequest memory sellRequest = ExchangeRequest(
             msg.sender, 
-            _tokenAmount, 
-            _weiAmount, 
-            _weiAmount / _tokenAmount, 
+            tokenAmount, 
+            weiAmount, 
+            weiAmount / tokenAmount, 
             allAtOnce
             );
 
@@ -358,20 +361,27 @@ contract Exchange {
         for (uint256 i = buyRequests.length - 1; i >= 0; i--){
             buyRequest = buyRequests[i];
 
-            // if(buyRequest.rate < sellRequest.rate)
-            if(sellRequest.rate > buyRequest.rate)
+            if(buyRequest.rate < sellRequest.rate)
                 break ;
-            if(buyRequest.allAtOnce && sellRequest.tokenAmount < buyRequest.tokenAmount)
-                continue; 
+            if(buyRequest.allAtOnce && buyRequest.tokenAmount > sellRequest.tokenAmount)
+                continue ;
             if(sellRequest.weiAmount > buyRequest.weiAmount) // seller all at once
                 continue ;               
-            
-            token.transfer(buyRequest.user, sellRequest.tokenAmount);
 
             if(sellRequest.weiAmount < buyRequest.weiAmount){
+                token.transfer(buyRequest.user, sellRequest.tokenAmount);
                 buyRequest = shrinkBuyRequest(buyRequest, sellRequest, i);
+                
+                if(buyRequest.tokenAmount == 0){
+                    // check for owner profit
+                    if(buyRequest.weiAmount > 0){
+                        payable(owner).transfer(buyRequest.weiAmount);
+                    }
+                    closeBuyRequest(buyRequest, i);
+                }
             }
             else{ // buyRequest.weiAmount == sellRequest.weiAmount: because of seller all at once
+                token.transfer(buyRequest.user, buyRequest.tokenAmount);
                 closeBuyRequest(buyRequest, i);
             }
             
