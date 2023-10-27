@@ -285,7 +285,18 @@ contract Exchange {
                 }
             }
             else{
-                matchRequests(buyRequest, sellRequest, buyRI, i);
+
+                uint256 weiAmount = transferWei(buyRequest, sellRequest, buyRequest.tokenAmount);
+                        
+                if(buyRequest.tokenAmount < sellRequest.tokenAmount)
+                    shrinkSellRequest(sellRequest, weiAmount, buyRequest.tokenAmount, i);
+                else // ==
+                    closeSellRequest(sellRequest, i);
+                
+                // transfer to buyer now (without lock)
+                token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
+                closeBuyRequest(buyRequest, buyRI);
+
                 return ;
             }            
         }
@@ -333,24 +344,31 @@ contract Exchange {
                 continue ;
                 
             if(sellRequest.weiAmount > buyRequest.weiAmount){
+                
+                uint256 weiAmount= transferWei(buyRequest, sellRequest, buyRequest.tokenAmount);
+                token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
+                closeBuyRequest(buyRequest, i);
+                
+                sellRequest = shrinkSellRequest(
+                    sellRequest, weiAmount, buyRequest.tokenAmount, sellRI);
 
-                token.transfer(buyRequest.user, sellRequest.tokenAmount);
-
-                transferWei(buyRequest, sellRequest, sellRequest.tokenAmount);
-                closeSellRequest(sellRequest, i);
-
-                // transfer to buyer now (without lock)
-                token.transferFrom(sellRequest.user, buyRequest.user, sellRequest.tokenAmount);
-                buyRequest = shrinkBuyRequest(
-                    buyRequest, sellRequest.weiAmount, sellRequest.tokenAmount, sellRI);
-
-                if(buyRequest.tokenAmount == 0){
-                    closeBuyRequest(buyRequest, sellRI);
+                if(sellRequest.weiAmount == 0){
+                    closeSellRequest(sellRequest, sellRI);
                     return ;
                 }
             }
             else{
-                matchRequests(buyRequest, sellRequest, i, sellRI);
+
+                uint256 weiAmount = transferWei(buyRequest, sellRequest, sellRequest.tokenAmount);        
+                token.transferFrom(sellRequest.user, buyRequest.user, sellRequest.tokenAmount);
+
+                if(sellRequest.weiAmount < buyRequest.weiAmount)
+                    shrinkBuyRequest(buyRequest, weiAmount, sellRequest.tokenAmount, i);
+                else // ==
+                    closeBuyRequest(buyRequest, i);
+                
+                closeSellRequest(sellRequest, i);
+                
                 return  ;
             }            
         }
@@ -358,26 +376,6 @@ contract Exchange {
         // lock tokens to match later
         if(sellRequest.weiAmount > 0)
             token.transfer(address(this), sellRequest.tokenAmount);
-    }
-
-
-    function matchRequests(
-        ExchangeRequest memory buyRequest,
-        ExchangeRequest memory sellRequest,
-        uint256 buyRI,
-        uint256 sellRI
-    ) internal {
-
-        uint256 weiAmount = transferWei(buyRequest, sellRequest, buyRequest.tokenAmount);
-                
-        if(buyRequest.tokenAmount < sellRequest.tokenAmount)
-            shrinkSellRequest(sellRequest, weiAmount, buyRequest.tokenAmount, sellRI);
-        else // ==
-            closeSellRequest(sellRequest, sellRI);
-        
-        // transfer to buyer now (without lock)
-        token.transferFrom(sellRequest.user, buyRequest.user, buyRequest.tokenAmount);
-        closeBuyRequest(buyRequest, buyRI);
     }
 
 }
